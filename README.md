@@ -97,19 +97,7 @@ Server-IP:
 kubectl get service disk-access-migration -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
-For a more production-ready setup, you might want to use a LoadBalancer or Ingress instead.
-
 ## Examples
-
-### Pushing files to a server
-
-```bash
-# Push all files from /local/data to the same path on the server
-cargo run --release -- client --server http://server:7000 --mode push
-
-# Push files with path remapping
-cargo run --release -- client --server http://server:7000 --mode push --remap /local/data:/remote/storage
-```
 
 ### Pulling files from a server
 
