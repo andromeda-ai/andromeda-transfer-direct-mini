@@ -1,0 +1,39 @@
+[package]
+name = "andromeda-transfer-direct-mini"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alex Lourenco <alex@andromeda.ai>"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Server
+axum = "0.7"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tower-http = { version = "0.5", features = ["fs"] }
+tower = { version = "0.4", features = ["util"] }
+jwalk = "0.7"
+
+# Client
+reqwest = { version = "0.11", features = ["stream", "json", "rustls-tls-native-roots"] }
+
+# TLS and certificates
+rcgen = { version = "0.13", features = ["crypto"] }
+
+# Utilities
+futures-util = "0.3"
+bytes = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+indicatif = "0.17.7"
+
+# Common
+http = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3.31"
+tokio-util = { version = "0.7.15", features = ["io"] }
+clap = { version = "4.5.38", features = ["derive"] }
+
+[dev-dependencies]
+anyhow = "1.0"
