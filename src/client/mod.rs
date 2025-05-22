@@ -20,10 +20,11 @@ pub struct FileTransferClient {
     client: Client,
     server_url: String,
     remap: Option<(String, String)>,
+    token: Option<String>,
 }
 
 impl FileTransferClient {
-    pub fn new(server_url: String, remap: Option<String>) -> Self {
+    pub fn new(server_url: String, remap: Option<String>, token: Option<String>) -> Self {
         let client = Client::new();
         
         let parsed_remap = remap.map(|r| {
@@ -36,11 +37,10 @@ impl FileTransferClient {
             }
         });
         
-        Self { client, server_url, remap: parsed_remap }
+        Self { client, server_url, remap: parsed_remap, token }
     }
     
     fn apply_remap(&self, path: &str, mode: Mode) -> String {
-        println!("Applying remap to {} with mode {:?}, remap: {:?}", path, mode, self.remap);
         if let Some((source, target)) = &self.remap {
             if source.is_empty() || target.is_empty() {
                 return path.to_string();
@@ -48,9 +48,7 @@ impl FileTransferClient {
             
             match mode {
                 Mode::Pull => {
-                    println!("Pulling file from {} to {}", path, target);
                     if path.starts_with(source) {
-                        println!("CHANGING PATH");
                         return path.replacen(source, target, 1);
                     }
                 },
@@ -66,7 +64,9 @@ impl FileTransferClient {
 
     pub async fn grab_work(&self) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
         let url = format!("{}/grab_work", self.server_url);
-        let resp = self.client.get(&url).send().await?;
+        let resp = self.client.get(&url)
+            .header("X_API_KEY", self.token.as_deref().unwrap_or(""))
+            .send().await?;
         match resp.status() {
             StatusCode::OK => {
                 let file_path = resp.text().await?;
@@ -97,6 +97,7 @@ impl FileTransferClient {
         
         let url = format!("{}/upload_file/{}", self.server_url, server_path);
         let resp = self.client.put(&url)
+            .header("X_API_KEY", self.token.as_deref().unwrap_or(""))
             .body(body)
             .send()
             .await?;
@@ -117,9 +118,9 @@ impl FileTransferClient {
         
         let server_path = remote_path;
         let local_path = target_path;
-        println!("Downloading file from {} to {}", server_path, local_path);
         
         let resp = self.client.get(&url)
+            .header("X_API_KEY", self.token.as_deref().unwrap_or(""))
             .header("X-File-Path", server_path)
             .send()
             .await?;
@@ -150,7 +151,7 @@ impl FileTransferClient {
         }
     }
 
-    pub fn new_with_tls(server_url: String, remap: Option<String>, use_tls: bool) -> Self {
+    pub fn new_with_tls(server_url: String, remap: Option<String>, use_tls: bool, token: Option<String>) -> Self {
         let client_builder = reqwest::Client::builder();
         
         let client_builder = if use_tls {
@@ -174,7 +175,7 @@ impl FileTransferClient {
             }
         });
         
-        Self { client, server_url, remap: parsed_remap }
+        Self { client, server_url, remap: parsed_remap, token }
     }
 }
 
@@ -183,7 +184,8 @@ pub async fn run_client_parallel(
     concurrency: usize, 
     mode: Mode,
     remap: Option<String>,
-    use_tls: bool
+    use_tls: bool,
+    token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_url = if use_tls && !server_url.starts_with("https://") {
         if server_url.starts_with("http://") {
@@ -231,13 +233,14 @@ pub async fn run_client_parallel(
         let worker_mode = mode;
         let worker_remap = remap.clone();
         let worker_use_tls = use_tls;
+        let worker_token = token.clone();
         let mut shutdown_rx = shutdown_tx.subscribe();
         
         join_set.spawn(async move {
             let client = if worker_use_tls {
-                FileTransferClient::new_with_tls(worker_url, worker_remap, worker_use_tls)
+                FileTransferClient::new_with_tls(worker_url, worker_remap, worker_use_tls, worker_token)
             } else {
-                FileTransferClient::new(worker_url, worker_remap)
+                FileTransferClient::new(worker_url, worker_remap, worker_token)
             };
             debug!("Worker {}: started", worker_id);
             
@@ -322,7 +325,7 @@ pub async fn run_client_parallel(
 }
 
 pub async fn run_client(server_url: String, mode: Mode) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    run_client_parallel(server_url, 4, mode, None, false).await
+    run_client_parallel(server_url, 4, mode, None, false, None).await
 }
 
 pub async fn run_client_with_remap(
@@ -332,7 +335,7 @@ pub async fn run_client_with_remap(
     remap: Option<String>
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let workers = concurrency.unwrap_or(4);
-    run_client_parallel(server_url, workers, mode, remap, false).await
+    run_client_parallel(server_url, workers, mode, remap, false, None).await
 }
 
 pub async fn run_client_with_remap_tls(
@@ -343,5 +346,5 @@ pub async fn run_client_with_remap_tls(
     use_tls: bool
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let workers = concurrency.unwrap_or(4);
-    run_client_parallel(server_url, workers, mode, remap, use_tls).await
+    run_client_parallel(server_url, workers, mode, remap, use_tls, None).await
 } 
