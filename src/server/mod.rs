@@ -11,6 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, put},
     Router,
+    middleware::{self, Next},
 };
 use axum_server::tls_rustls::RustlsConfig;
 use clap::{Arg, Command};
@@ -27,6 +28,7 @@ pub struct AppConfig {
     target_dir: String,
     downloaded_files_path: String,
     uploaded_files_path: String,
+    api_key: String,
 }
 
 impl Default for AppConfig {
@@ -35,6 +37,7 @@ impl Default for AppConfig {
             target_dir: ".".to_string(),
             downloaded_files_path: "downloaded_files.txt".to_string(),
             uploaded_files_path: "uploaded_files.txt".to_string(),
+            api_key: "".to_string(),
         }
     }
 }
@@ -70,12 +73,21 @@ pub fn parse_args() -> AppConfig {
                 .default_value("uploaded_files.txt")
                 .num_args(1),
         )
+        .arg(
+            Arg::new("api-key")
+                .long("api-key")
+                .value_name("KEY")
+                .help("API key for authentication")
+                .required(true)
+                .num_args(1),
+        )
         .get_matches();
 
     AppConfig {
         target_dir: matches.get_one::<String>("target-dir").unwrap().clone(),
         downloaded_files_path: matches.get_one::<String>("downloaded-files").unwrap().clone(),
         uploaded_files_path: matches.get_one::<String>("uploaded-files").unwrap().clone(),
+        api_key: matches.get_one::<String>("api-key").unwrap().clone(),
     }
 }
 
@@ -278,6 +290,25 @@ struct AppState {
     queue: FileQueue,
     downloaded: Arc<Mutex<HashSet<String>>>,
     uploaded: Arc<Mutex<HashSet<String>>>,
+    config: AppConfig,
+}
+
+async fn auth_middleware(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: axum::http::Request<Body>,
+    next: Next<Body>,
+) -> Result<Response, StatusCode> {
+    let api_key = headers
+        .get("X-API-Key")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if api_key != state.config.api_key {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(next.run(request).await)
 }
 
 async fn grab_work(State(state): State<AppState>) -> impl IntoResponse {
@@ -473,10 +504,11 @@ async fn run_server_internal(config: AppConfig) -> Result<(), Box<dyn std::error
     let downloaded_files_path = config.downloaded_files_path.clone();
     let uploaded_files_path = config.uploaded_files_path.clone();
     
-    let shared_state = AppState {
-        queue: Arc::new(Mutex::new(files)),
+    let state = AppState {
+        queue: FileQueue::new(files),
         downloaded: downloaded.clone(),
         uploaded: uploaded.clone(),
+        config: config.clone(),
     };
     
     let save_downloaded = downloaded.clone();
@@ -541,7 +573,11 @@ async fn run_server_internal(config: AppConfig) -> Result<(), Box<dyn std::error
         .route("/grab_work", get(grab_work))
         .route("/upload_file/:path", put(upload_file))
         .route("/download_file", get(download_file))
-        .with_state(shared_state);
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .with_state(state);
     
     let listener = tokio::net::TcpListener::bind("0.0.0.0:7000").await?;
     info!("Listening on http://0.0.0.0:7000");
@@ -575,10 +611,11 @@ async fn run_server_internal_tls(config: AppConfig, cert_path: String, key_path:
     let downloaded_files_path = config.downloaded_files_path.clone();
     let uploaded_files_path = config.uploaded_files_path.clone();
     
-    let shared_state = AppState {
-        queue: Arc::new(Mutex::new(files)),
+    let state = AppState {
+        queue: FileQueue::new(files),
         downloaded: downloaded.clone(),
         uploaded: uploaded.clone(),
+        config: config.clone(),
     };
     
     let save_downloaded = downloaded.clone();
@@ -643,7 +680,11 @@ async fn run_server_internal_tls(config: AppConfig, cert_path: String, key_path:
         .route("/grab_work", get(grab_work))
         .route("/upload_file/:path", put(upload_file))
         .route("/download_file", get(download_file))
-        .with_state(shared_state);
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .with_state(state);
 
     info!("Loading TLS configuration from {} and {}", cert_path, key_path);
     let tls_config = RustlsConfig::from_pem_file(cert_path, key_path).await?;

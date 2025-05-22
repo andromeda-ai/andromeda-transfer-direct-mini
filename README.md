@@ -1,6 +1,6 @@
 # Andromeda Transfer Direct
 
-A high-performance file transfer utility for efficiently moving files between systems, with support for parallel transfers, path remapping, and TLS encryption.
+A high-performance file transfer utility for efficiently moving files between systems, with support for parallel transfers, path remapping, TLS encryption, and API key authentication.
 
 ## Features
 
@@ -8,6 +8,7 @@ A high-performance file transfer utility for efficiently moving files between sy
 - **Parallel Processing**: Configure concurrent workers to maximize throughput
 - **Path Remapping**: Automatically transform paths between source and destination
 - **TLS Support**: Secure file transfers with TLS encryption
+- **API Key Authentication**: Secure access with pre-shared API keys
 - **Graceful Shutdown**: Handles interruptions cleanly, finishing in-progress transfers
 - **Progress Tracking**: Reports progress during large transfer operations
 
@@ -30,7 +31,11 @@ The compiled binary will be available at `./target/release/andromeda-transfer-di
 Start a server that listens for file transfer requests:
 
 ```bash
-cargo run --release -- server --port 7000
+# Basic usage with API key
+cargo run --release -- server --target-dir /path/to/files --api-key "your-secret-key"
+
+# With TLS and API key
+cargo run --release -- server --target-dir /path/to/files --tls --api-key "your-secret-key"
 ```
 
 ### Client Mode
@@ -38,24 +43,25 @@ cargo run --release -- server --port 7000
 Connect to a server to push or pull files:
 
 ```bash
-# Basic usage
-cargo run --release -- client http://server-address:7000 --mode push
+# Basic usage with API key
+cargo run --release -- client http://server-address:7000 --api-key "your-secret-key"
 
-# With path remapping
-cargo run --release -- client http://server-address:7000 --mode pull --remap /source/path:/destination/path
+# With path remapping and API key
+cargo run --release -- client http://server-address:7000 --mode pull --remap /source/path:/destination/path --api-key "your-secret-key"
 
-# With custom concurrency
-cargo run --release -- client http://server-address:7000 --mode push --concurrency 8
+# With custom concurrency and API key
+cargo run --release -- client http://server-address:7000 --mode push --concurrency 8 --api-key "your-secret-key"
 
-# With TLS
-cargo run --release -- client https://server-address:7000 --mode pull --tls
+# With TLS and API key
+cargo run --release -- client https://server-address:7000 --mode pull --tls --api-key "your-secret-key"
 ```
 
 ## Command-Line Flags
 
 ### Server Options
-- `--port <PORT>`: Port to listen on (default: 7000)
+- `--target-dir <DIR>`: Directory to serve files from
 - `--tls`: Enable TLS (HTTPS) mode
+- `--api-key <KEY>`: API key for authentication (required)
 
 ### Client Options
 - `--server <URL>`: Server URL to connect to
@@ -63,6 +69,7 @@ cargo run --release -- client https://server-address:7000 --mode pull --tls
 - `--concurrency <NUMBER>`: Number of parallel workers (default: 4)
 - `--remap <SOURCE:TARGET>`: Path remapping in format "source:target"
 - `--tls`: Enable TLS (HTTPS) mode
+- `--api-key <KEY>`: API key for authentication (required)
 
 ## Kubernetes Deployment
 

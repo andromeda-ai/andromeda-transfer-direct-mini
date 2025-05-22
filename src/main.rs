@@ -21,6 +21,9 @@ enum Commands {
         
         #[arg(long)]
         tls: bool,
+
+        #[arg(long)]
+        api_key: String,
     },
     
     Client {
@@ -40,6 +43,9 @@ enum Commands {
         
         #[arg(long)]
         tls: bool,
+
+        #[arg(long)]
+        api_key: String,
     },
 }
 
@@ -72,17 +78,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Server { target_dir, tls } => {
+        Commands::Server { target_dir, tls, api_key } => {
             tracing::info!("Starting in server mode");
             
             if tls {
                 let (cert_path, key_path) = generate_self_signed_cert()?;
-                server::run_server_tls(target_dir, cert_path, key_path).await?;
+                server::run_server_tls(target_dir, cert_path, key_path, api_key).await?;
             } else {
-                server::run_server(target_dir).await?;
+                server::run_server(target_dir, api_key).await?;
             }
         },
-        Commands::Client { server_url, concurrency, push: _, pull, remap, tls } => {
+        Commands::Client { server_url, concurrency, push: _, pull, remap, tls, api_key } => {
             let mode = if pull { Mode::Pull } else { Mode::Push };
             
             tracing::info!(
@@ -93,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 tls
             );
             
-            client::run_client_parallel(server_url, concurrency, mode, remap, tls).await?;
+            client::run_client_parallel(server_url, concurrency, mode, remap, tls, api_key).await?;
         }
     }
     
