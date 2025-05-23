@@ -56,6 +56,7 @@ cargo run --release -- client https://server-address:7000 --mode pull --tls
 ### Server Options
 - `--port <PORT>`: Port to listen on (default: 7000)
 - `--tls`: Enable TLS (HTTPS) mode
+- `--token <TOKEN>`: Optional security token. If set, all client requests must include this token in the `X_API_KEY` header.
 
 ### Client Options
 - `--server <URL>`: Server URL to connect to
@@ -63,6 +64,7 @@ cargo run --release -- client https://server-address:7000 --mode pull --tls
 - `--concurrency <NUMBER>`: Number of parallel workers (default: 4)
 - `--remap <SOURCE:TARGET>`: Path remapping in format "source:target"
 - `--tls`: Enable TLS (HTTPS) mode
+- `--token <TOKEN>`: Optional security token to send in the `X_API_KEY` header.
 
 ## Kubernetes Deployment
 
