@@ -27,6 +27,7 @@ pub struct AppConfig {
     target_dir: String,
     downloaded_files_path: String,
     uploaded_files_path: String,
+    token: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -35,6 +36,7 @@ impl Default for AppConfig {
             target_dir: ".".to_string(),
             downloaded_files_path: "downloaded_files.txt".to_string(),
             uploaded_files_path: "uploaded_files.txt".to_string(),
+            token: None,
         }
     }
 }
@@ -76,6 +78,7 @@ pub fn parse_args() -> AppConfig {
         target_dir: matches.get_one::<String>("target-dir").unwrap().clone(),
         downloaded_files_path: matches.get_one::<String>("downloaded-files").unwrap().clone(),
         uploaded_files_path: matches.get_one::<String>("uploaded-files").unwrap().clone(),
+        token: None,
     }
 }
 
@@ -278,9 +281,16 @@ struct AppState {
     queue: FileQueue,
     downloaded: Arc<Mutex<HashSet<String>>>,
     uploaded: Arc<Mutex<HashSet<String>>>,
+    token: Option<String>,
 }
 
-async fn grab_work(State(state): State<AppState>) -> impl IntoResponse {
+async fn grab_work(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    if let Some(token) = &state.token {
+        let header = headers.get("X_API_KEY").and_then(|v| v.to_str().ok());
+        if Some(token.as_str()) != header {
+            return (StatusCode::UNAUTHORIZED, "Invalid or missing X_API_KEY header".to_string());
+        }
+    }
     let mut queue = state.queue.lock().unwrap();
     match queue.pop_front() {
         Some(file_path) => {
@@ -289,7 +299,7 @@ async fn grab_work(State(state): State<AppState>) -> impl IntoResponse {
         }
         None => {
             debug!("No more files in queue");
-            (StatusCode::NO_CONTENT, String::new())
+            (StatusCode::NO_CONTENT, "".to_string())
         }
     }
 }
@@ -297,15 +307,25 @@ async fn grab_work(State(state): State<AppState>) -> impl IntoResponse {
 async fn upload_file(
     State(state): State<AppState>,
     AxumPath(file_path): AxumPath<String>,
+    headers: HeaderMap,
     body: Body,
 ) -> impl IntoResponse {
+    if let Some(token) = &state.token {
+        let header = headers.get("X_API_KEY").and_then(|v| v.to_str().ok());
+        if Some(token.as_str()) != header {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Invalid or missing X_API_KEY header",
+            );
+        }
+    }
     let temp_path = format!("{}.TEMP", file_path);
     if let Some(parent) = Path::new(&file_path).parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             error!("Failed to create directory: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create directory: {}", e),
+                "Failed to create directory",
             );
         }
     }
@@ -333,16 +353,16 @@ async fn upload_file(
                     }
                 }
             }
-            if let Some(error_msg) = write_error {
+            if let Some(_error_msg) = write_error {
                 let _ = tokio::fs::remove_file(&temp_path).await;
-                return (StatusCode::INTERNAL_SERVER_ERROR, error_msg);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write chunk");
             }
             if let Err(e) = file.flush().await {
                 error!("Failed to flush file: {}", e);
                 let _ = tokio::fs::remove_file(&temp_path).await;
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to flush file: {}", e),
+                    "Failed to flush file",
                 );
             }
             match tokio::fs::rename(&temp_path, &file_path).await {
@@ -354,7 +374,7 @@ async fn upload_file(
                     
                     (
                         StatusCode::CREATED,
-                        format!("File uploaded to {} ({} bytes)", file_path, total_bytes),
+                        "File uploaded successfully",
                     )
                 }
                 Err(e) => {
@@ -362,7 +382,7 @@ async fn upload_file(
                     let _ = tokio::fs::remove_file(&temp_path).await;
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to rename temp file: {}", e),
+                        "Failed to rename temp file",
                     )
                 }
             }
@@ -371,7 +391,7 @@ async fn upload_file(
             error!("Failed to create temp file: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create temp file: {}", e),
+                "Failed to create temp file",
             )
         }
     }
@@ -381,6 +401,15 @@ async fn download_file(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    if let Some(token) = &state.token {
+        let header = headers.get("X_API_KEY").and_then(|v| v.to_str().ok());
+        if Some(token.as_str()) != header {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .body(Body::from("Invalid or missing X_API_KEY header"))
+                .unwrap();
+        }
+    }
     const FILE_PATH_HEADER: &str = "X-File-Path";
     
     let file_path = match headers.get(FILE_PATH_HEADER) {
@@ -436,23 +465,23 @@ async fn download_file(
     }
 }
 
-pub async fn run_server(target_dir: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_server(target_dir: String, token: Option<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = AppConfig {
         target_dir,
         ..Default::default()
     };
-    run_server_internal(config).await
+    run_server_internal(config, token).await
 }
 
-pub async fn run_server_tls(target_dir: String, cert_path: String, key_path: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_server_tls(target_dir: String, cert_path: String, key_path: String, token: Option<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = AppConfig {
         target_dir,
         ..Default::default()
     };
-    run_server_internal_tls(config, cert_path, key_path).await
+    run_server_internal_tls(config, cert_path, key_path, token).await
 }
 
-async fn run_server_internal(config: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn run_server_internal(config: AppConfig, token: Option<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Starting server with target directory: {}", config.target_dir);
     
     info!("Using downloaded files list at: {}", config.downloaded_files_path);
@@ -477,6 +506,7 @@ async fn run_server_internal(config: AppConfig) -> Result<(), Box<dyn std::error
         queue: Arc::new(Mutex::new(files)),
         downloaded: downloaded.clone(),
         uploaded: uploaded.clone(),
+        token: token.or(config.token),
     };
     
     let save_downloaded = downloaded.clone();
@@ -554,7 +584,7 @@ async fn run_server_internal(config: AppConfig) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-async fn run_server_internal_tls(config: AppConfig, cert_path: String, key_path: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn run_server_internal_tls(config: AppConfig, cert_path: String, key_path: String, token: Option<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("Starting TLS server with target directory: {}", config.target_dir);
     
     info!("Using downloaded files list at: {}", config.downloaded_files_path);
@@ -579,6 +609,7 @@ async fn run_server_internal_tls(config: AppConfig, cert_path: String, key_path:
         queue: Arc::new(Mutex::new(files)),
         downloaded: downloaded.clone(),
         uploaded: uploaded.clone(),
+        token: token.or(config.token),
     };
     
     let save_downloaded = downloaded.clone();
