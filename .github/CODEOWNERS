@@ -1,0 +1,4 @@
+# All files require approval from a core approver.
+# To add/remove approvers, update the team membership:
+# https://github.com/orgs/andromeda-ai/teams/core-approvers
+* @andromeda-ai/core-approvers
